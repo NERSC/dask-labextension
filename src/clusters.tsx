@@ -11,7 +11,7 @@ import * as nbformat from '@jupyterlab/nbformat';
 
 import { ServerConnection } from '@jupyterlab/services';
 
-import { refreshIcon } from '@jupyterlab/ui-components';
+import { refreshIcon, settingsIcon } from '@jupyterlab/ui-components';
 
 import { ArrayExt } from '@lumino/algorithm';
 
@@ -34,6 +34,7 @@ import { showScalingDialog } from './scaling';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import { CommandRegistry } from '@lumino/commands';
+import { showNodeConfigurationDialog, INodeModel } from './node';
 
 /**
  * A refresh interval (in ms) for polling the backend cluster manager.
@@ -57,7 +58,12 @@ export class DaskClusterManager extends Widget {
   /**
    * Create a new Dask cluster manager.
    */
-
+  private nodeModel: INodeModel = {
+    cores: 8,
+    memory: '1GB',
+    python: '',
+    architecture: 'haswell'
+  };
   constructor(options: DaskClusterManager.IOptions) {
     super();
     this.addClass('dask-DaskClusterManager');
@@ -132,6 +138,19 @@ export class DaskClusterManager extends Widget {
       new CommandToolbarButton({
         commands: this._registry,
         id: this._launchClusterId
+      })
+    );
+
+    toolbar.addItem(
+      'configure-node-settings',
+      new ToolbarButton({
+        icon: settingsIcon,
+        onClick: () => {
+          showNodeConfigurationDialog(this.nodeModel).then(
+            model => (this.nodeModel = model)
+          );
+        },
+        tooltip: 'Configure Node Settings'
       })
     );
 
@@ -447,8 +466,11 @@ export class DaskClusterManager extends Widget {
   private async _launchCluster(): Promise<IClusterModel> {
     this._isReady = false;
     this._registry.notifyCommandChanged(this._launchClusterId);
+    let url = new URL(`${this._serverSettings.baseUrl}dask/clusters`);
+    if (this.nodeModel.python)
+      url.searchParams.append('python', this.nodeModel.python);
     const response = await ServerConnection.makeRequest(
-      `${this._serverSettings.baseUrl}dask/clusters`,
+      url.toString(),
       { method: 'PUT' },
       this._serverSettings
     );

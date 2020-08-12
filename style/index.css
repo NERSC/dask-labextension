@@ -314,3 +314,19 @@ button.dask-ClusterListingItem-scale {
   background-size: 85%;
   background-position: center;
 }
+
+.dask-nodeSetting-section {
+  display: flex;
+  margin: 10px 0px;
+}
+
+.dask-nodeSetting-section > div {
+  flex: 5;
+}
+
+.dask-nodeSetting-section > span {
+  flex: 1;
+  min-width: 100px;
+  width: 3vw;
+  max-width: 200px;
+}
