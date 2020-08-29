@@ -9,6 +9,9 @@ from tornado import web
 from notebook.base.handlers import APIHandler
 
 from .manager import manager
+from .config import GLOBAL_CONFIG, get_parameters
+
+import dask
 
 
 class DaskClusterHandler(APIHandler):
@@ -50,7 +53,7 @@ class DaskClusterHandler(APIHandler):
             self.finish(json.dumps(cluster_model))
 
     @web.authenticated
-    async def put(self, cluster_id: str = "") -> None:
+    async def put(self, cluster_id: str = "", cluster_type: str = None) -> None:
         """
         Create a new cluster with a given id. If no id is given, a random
         one is selected.
@@ -59,9 +62,17 @@ class DaskClusterHandler(APIHandler):
             raise web.HTTPError(
                 403, f"A Dask cluster with ID {cluster_id} already exists!"
             )
-
+        if cluster_type is None:
+            cluster_type = dask.config.get("labextension.default.factory")
         try:
-            cluster_model = await manager.start_cluster(cluster_id)
+            if cluster_type not in GLOBAL_CONFIG:
+                raise ValueError("Invalid cluster type for configuration.")
+            cluster_model = await manager.start_cluster(cluster_id, configuration={
+                "kwargs": {
+                    "local_scheduler": False,
+                    **get_parameters(cluster_type)
+                }
+            })
             self.set_status(200)
             self.finish(json.dumps(cluster_model))
         except Exception as e:

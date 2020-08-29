@@ -322,6 +322,8 @@ button.dask-ClusterListingItem-scale {
 
 .dask-nodeSetting-section > div {
   flex: 5;
+  display: flex;
+  flex-direction: column;
 }
 
 .dask-nodeSetting-section > span {

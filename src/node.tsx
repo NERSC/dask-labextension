@@ -1,16 +1,21 @@
-import { JSONObject } from '@lumino/coreutils';
 import { Dialog, showDialog } from '@jupyterlab/apputils';
 
 import * as React from 'react';
 
-export interface INodeModel extends JSONObject {
-  cores: number;
+type Environments = { [name: string]: string };
 
-  memory: string;
-
-  architecture: string;
-
-  python: string;
+type Configuration = Record<
+  string,
+  {
+    name: string;
+    value: any;
+    type: string;
+    options?: string[] | Environments;
+    selection?: string;
+  }
+>;
+export interface IServerModel {
+  [cluster: string]: Configuration;
 }
 
 namespace NodeSettings {
@@ -21,13 +26,18 @@ namespace NodeSettings {
     /**
      * The initial cluster model shown in the scaling.
      */
-    initialModel: INodeModel;
+    initialModel: IServerModel;
 
     /**
      * A callback that allows the component to write state to an
      * external object.
      */
-    stateEscapeHatch: (model: INodeModel) => void;
+    stateEscapeHatch: (model: IServerModel) => void;
+
+    /**
+     * The initial cluster to configure. Otherwise selects a random initial one.
+     */
+    cluster?: string;
   }
 
   /**
@@ -37,7 +47,8 @@ namespace NodeSettings {
     /**
      * The proposed cluster model shown in the scaling.
      */
-    model: INodeModel;
+    model: IServerModel;
+    cluster: string;
   }
 }
 
@@ -47,106 +58,152 @@ export class NodeSettings extends React.Component<
 > {
   constructor(props: NodeSettings.IProps) {
     super(props);
-    let model: INodeModel = props.initialModel;
-    this.state = { model };
+    let model: IServerModel = props.initialModel;
+    let clusterName = props.cluster || Object.keys(props.initialModel)[0];
+    this.state = { model, cluster: clusterName };
   }
 
   componentDidUpdate(): void {
-    let model: INodeModel = { ...this.state.model };
+    let model: IServerModel = { ...this.state.model };
     this.props.stateEscapeHatch(model);
   }
 
-  onPythonUpdate(event: React.ChangeEvent): void {
-    this.setState({
-      model: {
-        ...this.state.model,
-        python: (event.target as HTMLInputElement).value
-      }
-    });
+  onEntryUpdate(event: React.ChangeEvent, record: string): void {
+    let updated = {
+      ...this.state
+    };
+    updated.model[this.state.cluster][
+      record
+    ].value = (event.target as HTMLInputElement).value;
+    this.setState(updated);
   }
 
-  onCoreUpdate(event: React.ChangeEvent): void {
-    this.setState({
-      model: {
-        ...this.state.model,
-        cores: parseInt((event.target as HTMLInputElement).value, 10)
-      }
-    });
-  }
-
-  onMemoryUpdate(event: React.ChangeEvent): void {
-    this.setState({
-      model: {
-        ...this.state.model,
-        memory: (event.target as HTMLInputElement).value
-      }
-    });
-  }
-
-  onArchitectureUpdate(event: React.ChangeEvent): void {
-    this.setState({
-      model: {
-        ...this.state.model,
-        architecture: (event.target as HTMLInputElement).value
-      }
-    });
+  onEnvironmentEntryUpdate(event: React.ChangeEvent, record: string) {
+    let updated = {
+      ...this.state
+    };
+    let value = (event.target as HTMLInputElement).value;
+    updated.model[this.state.cluster][record].selection = value;
+    updated.model[this.state.cluster][record].value = (updated.model[
+      this.state.cluster
+    ][record].options as Environments)[value];
+    this.setState(updated);
   }
 
   render() {
-    const model = this.state.model;
-    return (
-      <div>
-        <div className="dask-nodeSetting-section">
-          <span>Cores</span>
-          <input
-            value={model.cores}
-            type="number"
-            step="1"
-            onChange={evt => {
-              this.onCoreUpdate(evt);
-            }}
-          />
-        </div>
-        <div className="dask-nodeSetting-section">
-          <span>Python Path</span>
-          <input
-            value={model.python}
-            type="text"
-            onChange={evt => {
-              this.onPythonUpdate(evt);
-            }}
-          />
-        </div>
-        <div className="dask-nodeSetting-section">
-          <span>Memory</span>
-          <input
-            value={model.memory}
-            type="text"
-            onChange={evt => {
-              this.onMemoryUpdate(evt);
-            }}
-          />
-        </div>
-        <div className="dask-nodeSetting-section">
-          <span>Architecture</span>
-          <input
-            value={model.architecture}
-            type="text"
-            onChange={evt => {
-              this.onArchitectureUpdate(evt);
-            }}
-          />
-        </div>
-      </div>
-    );
+    const model = this.state.model[this.state.cluster];
+    let clusterConfiguration = [];
+    for (let key in model) {
+      /** There's probably reuse of code here that you could avoid. */
+      if (model[key].type == 'int') {
+        clusterConfiguration.push(
+          <div className="dask-nodeSetting-section">
+            <span>{model[key].name}</span>
+            <div>
+              <input
+                value={model[key].value}
+                type="number"
+                step="1"
+                onChange={evt => {
+                  this.onEntryUpdate(evt, key);
+                }}
+              />
+            </div>
+          </div>
+        );
+      } else if (model[key].type.startsWith('env')) {
+        let options = [];
+        let modelOptions = model[key].options as Environments;
+        if (!modelOptions) throw new Error();
+        for (let option in modelOptions) {
+          options.push(<option value={option}>{option}</option>);
+          /** Check that there isn't a prior selection */
+          if (
+            !this.state.model[this.state.cluster][key].selection &&
+            modelOptions[option] == model[key].value
+          ) {
+            model[key].selection = option;
+          }
+        }
+        /**
+         * If there is completely no selection, then this must be uninitialized and we can set
+         * a custom value. If the user changes this, we can fix it later.
+         */
+        if (!this.state.model[this.state.cluster][key].selection) {
+          model[key].selection = 'custom value';
+        }
+        /** Use a completely invalid value parameter to ensure the safety of this */
+        options.push(<option value="custom value">Custom</option>);
+        clusterConfiguration.push(
+          <div className="dask-nodeSetting-section">
+            <span>{model[key].name}</span>
+            <div>
+              <select
+                onChange={evt => {
+                  this.onEnvironmentEntryUpdate(evt, key);
+                }}
+                value={model[key].selection}
+              >
+                {options}
+              </select>
+              <input
+                type="text"
+                value={model[key].value}
+                disabled={model[key].selection != 'custom value'}
+                onChange={evt => {
+                  this.onEntryUpdate(evt, key);
+                }}
+              />
+            </div>
+          </div>
+        );
+      } else if (model[key].type == 'select') {
+        let options = [];
+        let modelOptions = model[key].options;
+        if (!modelOptions) throw new Error();
+        for (let option of modelOptions as string[]) {
+          options.push(<option value={option}>{option}</option>);
+        }
+        clusterConfiguration.push(
+          <div className="dask-nodeSetting-section">
+            <span>{model[key].name}</span>
+            <div>
+              <select
+                onChange={evt => {
+                  this.onEntryUpdate(evt, key);
+                }}
+                value={model[key].value}
+              >
+                {options}
+              </select>
+            </div>
+          </div>
+        );
+      } else {
+        clusterConfiguration.push(
+          <div className="dask-nodeSetting-section">
+            <span>{model[key].name}</span>
+            <input
+              value={model[key].value}
+              type="text"
+              step="1"
+              onChange={evt => {
+                this.onEntryUpdate(evt, key);
+              }}
+            />
+          </div>
+        );
+      }
+    }
+    return <div>{clusterConfiguration}</div>;
   }
 }
 
 export function showNodeConfigurationDialog(
-  model: INodeModel
-): Promise<INodeModel> {
-  let updatedModel = { ...model };
-  const escapeHatch = (update: INodeModel) => {
+  model: IServerModel
+): Promise<IServerModel> {
+  let updatedModel: IServerModel = model;
+  const escapeHatch = (update: IServerModel) => {
     updatedModel = update;
   };
   return showDialog({

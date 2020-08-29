@@ -34,7 +34,7 @@ import { showScalingDialog } from './scaling';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import { CommandRegistry } from '@lumino/commands';
-import { showNodeConfigurationDialog, INodeModel } from './node';
+import { showNodeConfigurationDialog, IServerModel } from './node';
 
 /**
  * A refresh interval (in ms) for polling the backend cluster manager.
@@ -58,12 +58,7 @@ export class DaskClusterManager extends Widget {
   /**
    * Create a new Dask cluster manager.
    */
-  private nodeModel: INodeModel = {
-    cores: 8,
-    memory: '1GB',
-    python: '',
-    architecture: 'haswell'
-  };
+  private nodeModel: IServerModel;
   constructor(options: DaskClusterManager.IOptions) {
     super();
     this.addClass('dask-DaskClusterManager');
@@ -146,9 +141,41 @@ export class DaskClusterManager extends Widget {
       new ToolbarButton({
         icon: settingsIcon,
         onClick: () => {
-          showNodeConfigurationDialog(this.nodeModel).then(
-            model => (this.nodeModel = model)
-          );
+          window.fetch(`${this._serverSettings.baseUrl}dask/config`).then(v => {
+            v.json().then(model => {
+              if (!this.nodeModel) this.nodeModel = model;
+              showNodeConfigurationDialog(this.nodeModel).then(model => {
+                let clusters: any = {};
+                for (let cluster in model) {
+                  let clusterConfig: any = {};
+                  for (let key in model[cluster]) {
+                    if (model[cluster][key]['type'] == 'int') {
+                      clusterConfig[key] = parseInt(
+                        model[cluster][key]['value']
+                      );
+                    } else {
+                      clusterConfig[key] = model[cluster][key]['value'];
+                    }
+                  }
+                  clusters[cluster] = clusterConfig;
+                }
+                let url = new URL(`${this._serverSettings.baseUrl}dask/config`);
+                ServerConnection.makeRequest(
+                  url.toString(),
+                  {
+                    body: JSON.stringify(clusters),
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json'
+                    }
+                  },
+                  this._serverSettings
+                ).then(() => {
+                  this.nodeModel = model;
+                });
+              });
+            });
+          });
         },
         tooltip: 'Configure Node Settings'
       })
@@ -467,8 +494,6 @@ export class DaskClusterManager extends Widget {
     this._isReady = false;
     this._registry.notifyCommandChanged(this._launchClusterId);
     let url = new URL(`${this._serverSettings.baseUrl}dask/clusters`);
-    if (this.nodeModel.python)
-      url.searchParams.append('python', this.nodeModel.python);
     const response = await ServerConnection.makeRequest(
       url.toString(),
       { method: 'PUT' },
@@ -547,6 +572,9 @@ export class DaskClusterManager extends Widget {
     const cluster = this._clusters.find(c => c.id === id);
     if (!cluster) {
       throw Error(`Failed to find cluster ${id} to scale`);
+    }
+    if (!cluster.supports_scaling) {
+      throw Error('This cluster does not support scaling');
     }
     const update = await showScalingDialog(cluster);
     if (JSONExt.deepEqual(update, cluster)) {
@@ -771,16 +799,18 @@ function ClusterListingItem(props: IClusterListingItemProps) {
           }}
           title={`Inject client code for ${cluster.name}`}
         />
-        <button
-          className="dask-ClusterListingItem-button dask-ClusterListingItem-scale jp-mod-styled"
-          onClick={evt => {
-            scale();
-            evt.stopPropagation();
-          }}
-          title={`Rescale ${cluster.name}`}
-        >
-          SCALE
-        </button>
+        {cluster.supports_scaling && (
+          <button
+            className="dask-ClusterListingItem-button dask-ClusterListingItem-scale jp-mod-styled"
+            onClick={evt => {
+              scale();
+              evt.stopPropagation();
+            }}
+            title={`Rescale ${cluster.name}`}
+          >
+            SCALE
+          </button>
+        )}
         <button
           className="dask-ClusterListingItem-button dask-ClusterListingItem-stop jp-mod-styled"
           onClick={evt => {

@@ -1,15 +1,45 @@
 labextension:
-  factory:
-    module: 'dask.distributed'
-    class: 'LocalCluster'
-    args: []
-    kwargs: {}
+  factories:
+    "SLURMCluster":
+      {
+        name: "SLURM Cluster",
+        module: "dask_labextension.salloc_job",
+        class: "SLURMFixedCluster",
+        args: [],
+        kwargs: { "constraint": "haswell" },
+        parameters:
+          {
+            qos: { name: "QOS", value: "" },
+            account: { name: "Account", value: "" },
+            python: { name: "Python Path", type: "env:python", value: "" },
+            dask_path: { name: "Dask Path", type: "env:dask-mpi", value: "" },
+            memory_limit: { name: "Memory Limit", value: "0.5" },
+            threads_per_cpu: { name: "Threads per CPU", value: 1 },
+            time: { name: "Time", value: "" },
+            n_workers: { name: "Worker Count", value: 1 },
+            cores: { name: "Cores", value: 1 },
+            memory: { name: "Memory", value: "1GB" },
+            constraint:
+              {
+                name: "Constraint",
+                type: "select",
+                options: ["haswell", "knl"],
+                value: "knl",
+              },
+            timeout: { name: "Timeout", value: 100 },
+            scheduler_file:
+              { name: "Scheduler File", value: "~/scheduler.json" },
+          },
+      }
   default:
+    factory: "SLURMCluster"
     workers: null
-    adapt: null
+    adapt:
+      null
       # minimum: 0
       # maximum: 10
-  initial: []
+  initial:
+    []
     # - name: "My Big Cluster"
     #   workers: 100
     # - name: "Adaptive Cluster"

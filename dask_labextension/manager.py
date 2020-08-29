@@ -9,9 +9,11 @@ from typing import Any, Dict, List, Union
 from uuid import uuid4
 
 import dask
-from dask.distributed import Adaptive, utils
+from distributed import Adaptive, utils
 from tornado.ioloop import IOLoop
 from tornado.concurrent import Future
+from distributed.deploy import Cluster
+from dask_jobqueue.slurm import SLURMCluster
 
 # A type for a dask cluster model: a serializable
 # representation of information about the cluster.
@@ -21,15 +23,22 @@ ClusterModel = Dict[str, Any]
 Cluster = Any
 
 
-async def make_cluster(configuration: dict) -> Cluster:
-    module = importlib.import_module(dask.config.get("labextension.factory.module"))
-    Cluster = getattr(module, dask.config.get("labextension.factory.class"))
+async def make_cluster(configuration: dict, cluster_type: str = None) -> Cluster:
+    if cluster_type is None:
+        cluster_type = dask.config.get("labextension.default.factory")
 
-    kwargs = dask.config.get("labextension.factory.kwargs")
+    factory = dask.config.get("labextension.factories")[cluster_type]
+
+    module = importlib.import_module(factory["module"])
+    Cluster = getattr(module, factory["class"])
+
+
+    kwargs = factory["kwargs"]
     kwargs = {key.replace("-", "_"): entry for key, entry in kwargs.items()}
-
+    if "kwargs" in configuration:
+        kwargs.update({key.replace("-", "_"): entry for key, entry in configuration["kwargs"].items()})
     cluster = await Cluster(
-        *dask.config.get("labextension.factory.args"), **kwargs, asynchronous=True
+        *factory['args'], **kwargs, asynchronous=True
     )
 
     configuration = dask.config.merge(
@@ -43,7 +52,6 @@ async def make_cluster(configuration: dict) -> Cluster:
         t = cluster.scale(configuration.get("workers"))
         if isawaitable(t):
             await t
-
     return cluster, adaptive
 
 
@@ -120,7 +128,9 @@ class DaskClusterManager:
         """
         cluster = self._clusters.get(cluster_id)
         if cluster:
-            await cluster.close()
+            close_future = cluster.close()
+            if isawaitable(close_future):
+                await close_future
             self._clusters.pop(cluster_id)
             name = self._cluster_names.pop(cluster_id)
             adaptive = self._adaptives.pop(cluster_id, None)
@@ -169,7 +179,10 @@ class DaskClusterManager:
 
     async def scale_cluster(self, cluster_id: str, n: int) -> Union[ClusterModel, None]:
         cluster = self._clusters.get(cluster_id)
+
         name = self._cluster_names[cluster_id]
+        if hasattr(cluster, "_supports_scaling") and not cluster._supports_scaling:
+            return make_cluster_model(cluster_id, name, cluster, adaptive=None)
         adaptive = self._adaptives.pop(cluster_id, None)
 
         # Check if the cluster exists
@@ -289,6 +302,10 @@ def make_cluster_model(
         ),
         cores=cores,
     )
+    if hasattr(cluster, "_supports_scaling"):
+        model["supports_scaling"] = cluster._supports_scaling
+    else:
+        model["supports_scaling"] = True
     if adaptive:
         model["adapt"] = {"minimum": adaptive.minimum, "maximum": adaptive.maximum}
 
