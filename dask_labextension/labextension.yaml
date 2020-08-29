@@ -1,5 +1,13 @@
 labextension:
   factories:
+    "LocalCluster":
+      {
+        module: "dask.distributed",
+        class: "LocalCluster",
+        args: [],
+        kwargs: {},
+        parameters: {},
+      }
     "SLURMCluster":
       {
         name: "SLURM Cluster",
